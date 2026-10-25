@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aussie Birdwatcher Journal</title>
+    
+    <!-- Import Supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        /* Earthy Modern Styling */
+        :root {
+            --forest-green: #4A5D23;
+            --sage-green: #8F9779;
+            --earth-brown: #8B5A2B;
+            --sand-background: #F4F1EA;
+            --white: #FFFFFF;
+        }
+        body { font-family: sans-serif; background-color: var(--sand-background); padding: 20px; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; background: var(--white); padding: 30px; border-radius: 12px; }
+        header { text-align: center; color: var(--forest-green); margin-bottom: 20px;}
+        .form-group { margin-bottom: 15px; }
+        label { font-weight: bold; color: var(--earth-brown); display: block; margin-bottom: 5px;}
+        input, select, textarea { width: 100%; padding: 10px; border: 1px solid var(--sage-green); border-radius: 6px; box-sizing: border-box; }
+        button { background-color: var(--forest-green); color: white; border: none; padding: 12px; width: 100%; border-radius: 6px; cursor: pointer; font-size: 16px; margin-top: 10px;}
+        button:hover { background-color: var(--earth-brown); }
+        .hidden { display: none; }
+        
+        /* Grid for entries */
+        .journal-entries { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .entry-card { border: 1px solid var(--sage-green); padding: 15px; border-radius: 8px; background: var(--sand-background); }
+        .entry-card img { max-width: 100%; border-radius: 6px; height: 200px; object-fit: cover; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Aussie Birdwatcher</h1>
+        <p>Record your sightings across Australia</p>
+    </header>
+
+    <div class="container">
+        
+        <!-- Login Section -->
+        <div id="auth-section">
+            <h2>Sign Up / Log In</h2>
+            <div class="form-group"><label>Email</label><input type="email" id="email"></div>
+            <div class="form-group"><label>Password</label><input type="password" id="password"></div>
+            <button onclick="handleAuth('signup')">Sign Up</button>
+            <button onclick="handleAuth('login')" style="background-color: var(--sage-green);">Log In</button>
+        </div>
+
+        <!-- Journal Section -->
+        <div id="journal-section" class="hidden">
+            <button onclick="logout()" style="background-color: darkred; width: auto; float: right; padding: 8px;">Log Out</button>
+            <h2>New Sighting</h2>
+            
+            <div class="form-group">
+                <label>Category</label>
+                <select id="bird-category">
+                    <option value="Parrots & Cockatoos">Parrots & Cockatoos</option>
+                    <option value="Birds of Prey">Birds of Prey</option>
+                    <option value="Waterbirds">Waterbirds</option>
+                    <option value="Bush Birds">Bush Birds</option>
+                </select>
+            </div>
+            <div class="form-group"><label>Photo</label><input type="file" id="photo-upload" accept="image/*"></div>
+            <div class="form-group"><label>Location</label><input type="text" id="location"></div>
+            <div class="form-group"><label>Date</label><input type="date" id="date"></div>
+            <div class="form-group"><label>Notes</label><textarea id="notes" rows="3"></textarea></div>
+            <button onclick="saveEntry()" id="save-btn">Save Journal Entry</button>
+
+            <h2 style="margin-top: 40px;">My Sighting Journal</h2>
+            <div class="journal-entries" id="entries-display"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- STEP 1: INITIALIZE SUPABASE ---
+        const SUPABASE_URL = 'https://yalzsuokmrzaklduphzc.supabase.co/rest/v1/';
+        const SUPABASE_KEY = 'sb_publishable_Hk83fsuk2JR1hF2JDY1FDQ_PTAFWCL3';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let currentUser = null;
+
+        // Check if user is already logged in when the page loads
+        window.onload = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                currentUser = session.user;
+                showJournal();
+            }
+        };
+
+        // --- STEP 2: AUTHENTICATION ---
+        async function handleAuth(action) {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            let result;
+            if (action === 'signup') {
+                result = await supabase.auth.signUp({ email, password });
+                alert("Signed up! You can now log in.");
+            } else {
+                result = await supabase.auth.signInWithPassword({ email, password });
+                if (result.error) {
+                    alert(result.error.message);
+                } else {
+                    currentUser = result.data.user;
+                    showJournal();
+                }
+            }
+        }
+
+        async function logout() {
+            await supabase.auth.signOut();
+            document.getElementById('auth-section').classList.remove('hidden');
+            document.getElementById('journal-section').classList.add('hidden');
+            currentUser = null;
+        }
+
+        function showJournal() {
+            document.getElementById('auth-section').classList.add('hidden');
+            document.getElementById('journal-section').classList.remove('hidden');
+            fetchEntries(); // Load past entries
+        }
+
+        // --- STEP 3: SAVING DATA AND IMAGES ---
+        async function saveEntry() {
+            document.getElementById('save-btn').innerText = "Saving...";
+            
+            const category = document.getElementById('bird-category').value;
+            const location = document.getElementById('location').value;
+            const date = document.getElementById('date').value;
+            const notes = document.getElementById('notes').value;
+            const photoInput = document.getElementById('photo-upload');
+            
+            let imageUrl = null;
+
+            // 1. Upload Image to Storage if a file was selected
+            if (photoInput.files.length > 0) {
+                const file = photoInput.files[0];
+                const fileExt = file.name.split('.').pop();
+                const filePath = `${currentUser.id}/${Date.now()}.${fileExt}`; // Unique file name
+                
+                const { error: uploadError } = await supabase.storage.from('bird-images').upload(filePath, file);
+                if (!uploadError) {
+                    // Get the public URL of the uploaded image
+                    const { data } = supabase.storage.from('bird-images').getPublicUrl(filePath);
+                    imageUrl = data.publicUrl;
+                }
+            }
+
+            // 2. Save the text data and image URL to the Database
+            const { error: dbError } = await supabase.from('bird_sightings').insert([
+                { user_id: currentUser.id, category, location, date, notes, image_url: imageUrl }
+            ]);
+
+            if (dbError) alert("Error saving entry!");
+            else {
+                alert("Entry Saved!");
+                fetchEntries(); // Refresh the list
+            }
+            document.getElementById('save-btn').innerText = "Save Journal Entry";
+        }
+
+        // --- STEP 4: DISPLAYING ENTRIES ---
+        async function fetchEntries() {
+            const display = document.getElementById('entries-display');
+            display.innerHTML = 'Loading...';
+
+            const { data, error } = await supabase
+                .from('bird_sightings')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (error) { display.innerHTML = 'Error loading entries.'; return; }
+            
+            display.innerHTML = '';
+            data.forEach(entry => {
+                const imgHTML = entry.image_url ? `<img src="${entry.image_url}" alt="Bird Photo">` : '';
+                display.innerHTML += `
+                    <div class="entry-card">
+                        ${imgHTML}
+                        <h3>${entry.category}</h3>
+                        <p><strong>Location:</strong> ${entry.location}</p>
+                        <p><strong>Date:</strong> ${entry.date}</p>
+                        <p>${entry.notes}</p>
+                    </div>
+                `;
+            });
+        }
+    </script>
+</body>
+</html>
