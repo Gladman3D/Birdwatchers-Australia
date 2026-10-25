@@ -78,11 +78,21 @@
 
     <script>
         // --- STEP 1: INITIALIZE SUPABASE ---
-        const SUPABASE_URL = 'https://yalzsuokmrzaklduphzc.supabase.co/rest/v1/';
+        const SUPABASE_URL = 'https://yalzsuokmrzaklduphzc.supabase.co';
         const SUPABASE_KEY = 'sb_publishable_Hk83fsuk2JR1hF2JDY1FDQ_PTAFWCL3';
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         let currentUser = null;
+
+        function showJournal() {
+            document.getElementById('auth-section').classList.add('hidden');
+            document.getElementById('journal-section').classList.remove('hidden');
+        }
+
+        function hideAuth() {
+            document.getElementById('auth-section').classList.remove('hidden');
+            document.getElementById('journal-section').classList.add('hidden');
+        }
 
         // Check if user is already logged in when the page loads
         window.onload = async () => {
@@ -90,63 +100,70 @@
             if (session) {
                 currentUser = session.user;
                 showJournal();
+                fetchEntries();
+            } else {
+                hideAuth();
             }
         };
 
-  // --- STEP 2: AUTHENTICATION (UPDATED) ---
+        async function logout() {
+            const { error } = await supabase.auth.signOut();
+            if (error) {
+                alert('Log Out Error: ' + error.message);
+                return;
+            }
+
+            currentUser = null;
+            hideAuth();
+        }
+
+        // --- STEP 2: AUTHENTICATION ---
         async function handleAuth(action) {
-            const email = document.getElementById('email').value;
+            const email = document.getElementById('email').value.trim();
             const password = document.getElementById('password').value;
             
-            // 1. Basic Validation
             if (!email || !password) {
                 alert("Please enter both an email and a password.");
-                return; // Stop the function here
+                return;
             }
             if (password.length < 6) {
                 alert("For security, Supabase requires passwords to be at least 6 characters long.");
                 return;
             }
             
-            let result;
-            
-            // 2. Sign Up Logic with Error Handling
             if (action === 'signup') {
-                result = await supabase.auth.signUp({ 
-                    email: email, 
-                    password: password 
-                });
-                
-                // Check if Supabase sent back an error
-                if (result.error) {
-                    alert("Sign Up Error: " + result.error.message);
-                    console.error("Detailed error:", result.error);
-                } else {
-                    alert("Signed up successfully! You can now click Log In.");
+                const { error } = await supabase.auth.signUp({ email, password });
+
+                if (error) {
+                    alert("Sign Up Error: " + error.message);
+                    console.error("Detailed error:", error);
+                    return;
                 }
-            } 
-            
-            // 3. Log In Logic with Error Handling
-            else if (action === 'login') {
-                result = await supabase.auth.signInWithPassword({ 
-                    email: email, 
-                    password: password 
-                });
-                
-                if (result.error) {
-                    alert("Log In Error: " + result.error.message);
-                    console.error("Detailed error:", result.error);
-                } else {
-                    // Success! Save the user data and show the journal
-                    currentUser = result.data.user;
-                    showJournal();
+
+                alert("Signed up successfully! Please check your email to confirm your account.");
+            } else if (action === 'login') {
+                const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+                if (error) {
+                    alert("Log In Error: " + error.message);
+                    console.error("Detailed error:", error);
+                    return;
                 }
+
+                currentUser = data.user;
+                showJournal();
+                fetchEntries();
             }
         }
 
         // --- STEP 3: SAVING DATA AND IMAGES ---
         async function saveEntry() {
-            document.getElementById('save-btn').innerText = "Saving...";
+            if (!currentUser) {
+                alert('Please log in first.');
+                return;
+            }
+
+            document.getElementById('save-btn').innerText = 'Saving...';
             
             const category = document.getElementById('bird-category').value;
             const location = document.getElementById('location').value;
@@ -160,14 +177,18 @@
             if (photoInput.files.length > 0) {
                 const file = photoInput.files[0];
                 const fileExt = file.name.split('.').pop();
-                const filePath = `${currentUser.id}/${Date.now()}.${fileExt}`; // Unique file name
+                const filePath = `${currentUser.id}/${Date.now()}.${fileExt}`;
                 
                 const { error: uploadError } = await supabase.storage.from('bird-images').upload(filePath, file);
-                if (!uploadError) {
-                    // Get the public URL of the uploaded image
-                    const { data } = supabase.storage.from('bird-images').getPublicUrl(filePath);
-                    imageUrl = data.publicUrl;
+                if (uploadError) {
+                    console.error('Upload failed:', uploadError);
+                    alert('Image upload failed: ' + uploadError.message);
+                    document.getElementById('save-btn').innerText = 'Save Journal Entry';
+                    return;
                 }
+
+                const { data } = supabase.storage.from('bird-images').getPublicUrl(filePath);
+                imageUrl = data.publicUrl;
             }
 
             // 2. Save the text data and image URL to the Database
@@ -175,12 +196,18 @@
                 { user_id: currentUser.id, category, location, date, notes, image_url: imageUrl }
             ]);
 
-            if (dbError) alert("Error saving entry!");
-            else {
-                alert("Entry Saved!");
-                fetchEntries(); // Refresh the list
+            if (dbError) {
+                alert('Error saving entry: ' + dbError.message);
+            } else {
+                alert('Entry saved!');
+                document.getElementById('location').value = '';
+                document.getElementById('date').value = '';
+                document.getElementById('notes').value = '';
+                document.getElementById('photo-upload').value = '';
+                fetchEntries();
             }
-            document.getElementById('save-btn').innerText = "Save Journal Entry";
+
+            document.getElementById('save-btn').innerText = 'Save Journal Entry';
         }
 
         // --- STEP 4: DISPLAYING ENTRIES ---
@@ -191,11 +218,21 @@
             const { data, error } = await supabase
                 .from('bird_sightings')
                 .select('*')
+                .eq('user_id', currentUser?.id)
                 .order('created_at', { ascending: false });
 
-            if (error) { display.innerHTML = 'Error loading entries.'; return; }
-            
+            if (error) {
+                display.innerHTML = 'Error loading entries.';
+                console.error(error);
+                return;
+            }
+
             display.innerHTML = '';
+            if (!data || data.length === 0) {
+                display.innerHTML = '<p>No sightings yet. Add your first birdwatching entry!</p>';
+                return;
+            }
+
             data.forEach(entry => {
                 const imgHTML = entry.image_url ? `<img src="${entry.image_url}" alt="Bird Photo">` : '';
                 display.innerHTML += `
