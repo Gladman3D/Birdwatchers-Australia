@@ -93,37 +93,55 @@
             }
         };
 
-        // --- STEP 2: AUTHENTICATION ---
+  // --- STEP 2: AUTHENTICATION (UPDATED) ---
         async function handleAuth(action) {
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             
+            // 1. Basic Validation
+            if (!email || !password) {
+                alert("Please enter both an email and a password.");
+                return; // Stop the function here
+            }
+            if (password.length < 6) {
+                alert("For security, Supabase requires passwords to be at least 6 characters long.");
+                return;
+            }
+            
             let result;
+            
+            // 2. Sign Up Logic with Error Handling
             if (action === 'signup') {
-                result = await supabase.auth.signUp({ email, password });
-                alert("Signed up! You can now log in.");
-            } else {
-                result = await supabase.auth.signInWithPassword({ email, password });
+                result = await supabase.auth.signUp({ 
+                    email: email, 
+                    password: password 
+                });
+                
+                // Check if Supabase sent back an error
                 if (result.error) {
-                    alert(result.error.message);
+                    alert("Sign Up Error: " + result.error.message);
+                    console.error("Detailed error:", result.error);
                 } else {
+                    alert("Signed up successfully! You can now click Log In.");
+                }
+            } 
+            
+            // 3. Log In Logic with Error Handling
+            else if (action === 'login') {
+                result = await supabase.auth.signInWithPassword({ 
+                    email: email, 
+                    password: password 
+                });
+                
+                if (result.error) {
+                    alert("Log In Error: " + result.error.message);
+                    console.error("Detailed error:", result.error);
+                } else {
+                    // Success! Save the user data and show the journal
                     currentUser = result.data.user;
                     showJournal();
                 }
             }
-        }
-
-        async function logout() {
-            await supabase.auth.signOut();
-            document.getElementById('auth-section').classList.remove('hidden');
-            document.getElementById('journal-section').classList.add('hidden');
-            currentUser = null;
-        }
-
-        function showJournal() {
-            document.getElementById('auth-section').classList.add('hidden');
-            document.getElementById('journal-section').classList.remove('hidden');
-            fetchEntries(); // Load past entries
         }
 
         // --- STEP 3: SAVING DATA AND IMAGES ---
